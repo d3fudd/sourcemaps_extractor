@@ -1,51 +1,61 @@
 <?php
 
-$mapFile = $argv[1];
+$mapFile = $argv[1] ?? null;
 
-if (!file_exists($mapFile)) {
-    echo "Arquivo map '{$mapFile}' não encontrado.\n";
+if (!$mapFile || !file_exists($mapFile)) {
+    fwrite(STDERR, "Arquivo map '{$mapFile}' não encontrado.\n");
     exit(1);
 }
 
 $jsonContent = file_get_contents($mapFile);
 $json = json_decode($jsonContent);
 if (!$json) {
-    echo "Erro ao decodificar o arquivo JSON.\n";
+    fwrite(STDERR, "Erro ao decodificar o arquivo JSON.\n");
     exit(1);
 }
 
 if (!isset($json->sources) || !isset($json->sourcesContent)) {
-    echo "O arquivo map não contém 'sources' ou 'sourcesContent'.\n";
+    fwrite(STDERR, "O arquivo map não contém 'sources' ou 'sourcesContent'.\n");
     exit(1);
 }
 
 $extractedFiles = [];
 
 foreach ($json->sources as $index => $source) {
+    // Remover prefixo webpack://
     if (strpos($source, 'webpack://') === 0) {
         $source = substr($source, strlen('webpack://'));
     }
-    $source = ltrim($source, '/');
-    $dir = dirname($source);
-    if (!is_dir($dir)) {
+    // Remover barras iniciais
+    $source = ltrim($source, '/\\');
+    // Evitar diretórios acima (../ ou ..\)
+    $safeSource = str_replace(['../', '..\\'], '', $source);
+    // Normalize para diretório atual
+    $safeSource = trim($safeSource, "/\\");
+
+    $dir = dirname($safeSource);
+    $fileName = basename($safeSource);
+
+    // Se dirname retornar '.', significa diretório atual
+    if ($dir !== '.' && $dir !== '' && !is_dir($dir)) {
         if (!mkdir($dir, 0755, true)) {
-            echo "Falha ao criar o diretório: {$dir}\n";
+            fwrite(STDERR, "Falha ao criar o diretório: {$dir}\n");
             continue;
         }
     }
-    $fileName = basename($source);
+
+    $filePath = ($dir !== '.' && $dir !== '' ? $dir . DIRECTORY_SEPARATOR : '') . $fileName;
 
     if (isset($json->sourcesContent[$index])) {
-        $filePath = $dir . DIRECTORY_SEPARATOR . $fileName;
         if (file_put_contents($filePath, $json->sourcesContent[$index]) !== false) {
             $extractedFiles[] = $filePath;
         } else {
-            echo "Erro ao gravar o arquivo: {$filePath}\n";
+            fwrite(STDERR, "Erro ao gravar o arquivo: {$filePath}\n");
         }
     } else {
-        echo "Conteúdo da fonte não encontrado para: {$source}\n";
+        fwrite(STDERR, "Conteúdo da fonte não encontrado para: {$safeSource}\n");
     }
 }
 
-echo "Todos os códigos-fonte foram extraídos do arquivo map:\n";
+echo "Todos os códigos-fonte foram extraídos no diretório atual:\n";
 print_r($extractedFiles);
